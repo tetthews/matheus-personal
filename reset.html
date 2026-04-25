@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Redefinir senha — Matheus Personal</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="auth-page">
+
+  <div class="auth-card">
+    <div class="auth-logo">MP</div>
+    <div class="auth-sub">Redefinir senha</div>
+
+    <div id="msg" class="msg error"></div>
+
+    <!-- Seção: enviar link -->
+    <div id="send-section">
+      <h2>Esqueci minha senha</h2>
+      <p style="color:var(--muted);font-size:13px;margin-bottom:20px">
+        Informe seu email e enviaremos um link para redefinir sua senha.
+      </p>
+      <div class="field">
+        <label for="reset-email">Email</label>
+        <input type="email" id="reset-email" placeholder="seu@email.com" autocomplete="email">
+      </div>
+      <button class="btn-primary" id="btn-send">Enviar link</button>
+    </div>
+
+    <!-- Seção: nova senha (aparece após clicar no link do email) -->
+    <div id="update-section" style="display:none">
+      <h2>Nova senha</h2>
+      <p style="color:var(--muted);font-size:13px;margin-bottom:20px">
+        Escolha uma nova senha para sua conta.
+      </p>
+      <div class="field">
+        <label for="new-password">Nova senha</label>
+        <input type="password" id="new-password" placeholder="Mínimo 6 caracteres" autocomplete="new-password">
+      </div>
+      <button class="btn-primary" id="btn-update">Atualizar senha</button>
+    </div>
+
+    <div class="auth-footer" style="margin-top:16px">
+      <a href="/login">← Voltar ao login</a>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script src="auth.js"></script>
+</body>
+</html>
