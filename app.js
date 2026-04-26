@@ -36,6 +36,28 @@ const WORKOUTS = {
   6: { name: 'Sábado — Fullbody leve + Abdômen', exercises: ['3x Agachamento goblet','3x Supino máquina leve','3x Puxada triângulo','3x Desenvolvimento haltere','3x Prancha 30-60s','3x Crunch abdominal','3x Elevação de pernas'] },
 };
 
+// Biblioteca de hábitos pré-definidos
+const PRESET_BLOCKS = [
+  { key: 'yoga',        emoji: '🧘', name: 'Yoga',                          xp: 8,  defaultDays: [1,2,3,4,5]     },
+  { key: 'leitura',     emoji: '📚', name: 'Ler livro',                      xp: 5,  defaultDays: [0,1,2,3,4,5,6] },
+  { key: 'alongamento', emoji: '🤸', name: 'Alongamento',                    xp: 5,  defaultDays: [1,2,3,4,5]     },
+  { key: 'ligar',       emoji: '📞', name: 'Ligar para alguém',              xp: 5,  defaultDays: [0,6]            },
+  { key: 'meditacao',   emoji: '🫧', name: 'Meditação',                      xp: 8,  defaultDays: [0,1,2,3,4,5,6] },
+  { key: 'diario',      emoji: '✍️', name: 'Escrever no diário',             xp: 5,  defaultDays: [0,1,2,3,4,5,6] },
+  { key: 'vitaminas',   emoji: '💊', name: 'Tomar vitaminas',                xp: 3,  defaultDays: [0,1,2,3,4,5,6] },
+  { key: 'sol',         emoji: '☀️', name: 'Tomar sol 15 min',               xp: 5,  defaultDays: [0,1,2,3,4,5,6] },
+  { key: 'sem_alcool',  emoji: '🚫', name: 'Sem álcool',                     xp: 10, defaultDays: [0,1,2,3,4,5,6] },
+  { key: 'organizar',   emoji: '🏠', name: 'Organizar ambiente',             xp: 5,  defaultDays: [6,0]            },
+  { key: 'gastos',      emoji: '💰', name: 'Conferir gastos do dia',         xp: 3,  defaultDays: [0,1,2,3,4,5,6] },
+  { key: 'foco',        emoji: '🎯', name: 'Sessão de foco 25 min',          xp: 8,  defaultDays: [1,2,3,4,5]     },
+  { key: 'gratidao',    emoji: '🙏', name: 'Listar 3 gratidões',             xp: 5,  defaultDays: [0,1,2,3,4,5,6] },
+  { key: 'dormir_cedo', emoji: '🌙', name: 'Dormir antes da meia-noite',     xp: 5,  defaultDays: [0,1,2,3,4,5,6] },
+  { key: 'frio',        emoji: '🚿', name: 'Banho frio',                     xp: 8,  defaultDays: [0,1,2,3,4,5,6] },
+  { key: 'sem_celular', emoji: '📵', name: 'Sem celular 1h antes de dormir', xp: 5,  defaultDays: [0,1,2,3,4,5,6] },
+  { key: 'proteina',    emoji: '🥩', name: 'Meta de proteína batida',        xp: 8,  defaultDays: [0,1,2,3,4,5,6] },
+  { key: 'caminhada_ex',emoji: '🌳', name: 'Caminhada ao ar livre',          xp: 8,  defaultDays: [6,0]            },
+];
+
 const LEVELS = [
   { min: 0,   max: 99,  name: 'Iniciante' },
   { min: 100, max: 199, name: 'Comprometido' },
@@ -264,6 +286,19 @@ async function saveCustomBlock({ id, emoji, name, xp, days }) {
   setSaveStatus('saved');
 }
 
+async function addPresetBlock(preset) {
+  const uid      = currentUser.id;
+  const position = state.customBlocks.length;
+  setSaveStatus('saving');
+  const { data, error } = await sb.from('custom_blocks')
+    .insert({ user_id: uid, emoji: preset.emoji, name: preset.name, xp: preset.xp,
+              days: preset.defaultDays, position, preset_key: preset.key })
+    .select().single();
+  if (error) { setSaveStatus('error', error.message); throw error; }
+  state.customBlocks.push(data);
+  setSaveStatus('saved');
+}
+
 async function deleteCustomBlock(id) {
   const uid = currentUser.id;
   setSaveStatus('saving');
@@ -342,6 +377,7 @@ function initModal() {
       closeBlockModal();
       buildHoje();
       renderHoje();
+      renderHabitLibrary();
     } catch { alert('Erro ao salvar. Tente novamente.'); }
     finally { btn.disabled = false; btn.textContent = 'Salvar item'; }
   });
@@ -358,6 +394,7 @@ function initModal() {
       closeBlockModal();
       buildHoje();
       renderHoje();
+      renderHabitLibrary();
     } catch { alert('Erro ao excluir. Tente novamente.'); }
     finally { btn.disabled = false; btn.textContent = 'Excluir item'; }
   });
@@ -940,6 +977,138 @@ function renderSchedule() {
 }
 
 // ============================================
+// Render — Biblioteca de hábitos
+// ============================================
+
+function renderHabitLibrary() {
+  const container = document.getElementById('habit-library-wrap');
+  if (!container) return;
+
+  const activeKeys  = new Set(state.customBlocks.map(b => b.preset_key).filter(Boolean));
+  const available   = PRESET_BLOCKS.filter(p => !activeKeys.has(p.key));
+  const hasActive   = state.customBlocks.length > 0;
+
+  let html = '';
+
+  // --- Hábitos ativos (custom + preset) ---
+  if (hasActive) {
+    state.customBlocks.forEach(b => {
+      const days    = b.days || [];
+      const dayBtns = DAY_SHORT.map((d, i) =>
+        `<button type="button" class="day-mini-btn${days.includes(i) ? ' on' : ''}" data-bid="${b.id}" data-dow="${i}">${d}</button>`
+      ).join('');
+      html += `
+        <div class="habit-row">
+          <div class="habit-row-top">
+            <span class="habit-emoji">${b.emoji}</span>
+            <span class="habit-name">${b.name}</span>
+            <span class="habit-xp-badge">+${b.xp} XP</span>
+            <button type="button" class="habit-edit-btn" data-edit="${b.id}" title="Editar">✏️</button>
+            <button type="button" class="habit-rem-btn" data-remove="${b.id}" title="Remover">✕</button>
+          </div>
+          <div class="habit-days">${dayBtns}</div>
+        </div>`;
+    });
+    html += `<div class="habit-divider"></div>`;
+  }
+
+  // --- Biblioteca de presets disponíveis ---
+  if (available.length > 0) {
+    html += `<p class="preset-lib-title">Adicionar da biblioteca</p>
+      <div class="preset-grid">`;
+    available.forEach(p => {
+      html += `
+        <button type="button" class="preset-chip" data-key="${p.key}">
+          <span class="preset-emoji">${p.emoji}</span>
+          <span class="preset-chip-name">${p.name}</span>
+          <span class="preset-chip-xp">+${p.xp} XP</span>
+        </button>`;
+    });
+    html += `</div>`;
+  } else {
+    html += `<p class="preset-lib-title">Todos os hábitos da biblioteca já estão ativos 🎉</p>`;
+  }
+
+  html += `<button class="add-block-btn" id="lib-add-custom" style="margin-top:8px">✏️ Criar hábito personalizado</button>`;
+  container.innerHTML = html;
+
+  // Listeners — dias inline
+  container.querySelectorAll('.day-mini-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const blockId = btn.dataset.bid;
+      const dow     = parseInt(btn.dataset.dow);
+      const block   = state.customBlocks.find(b => b.id === blockId);
+      if (!block) return;
+
+      const prev = [...block.days];
+      const next = [...prev];
+      const idx  = next.indexOf(dow);
+      if (idx > -1) {
+        if (next.length <= 1) return; // mínimo 1 dia
+        next.splice(idx, 1);
+      } else { next.push(dow); }
+      next.sort((a, b) => a - b);
+
+      block.days = next;
+      btn.classList.toggle('on', next.includes(dow));
+
+      setSaveStatus('saving');
+      const { error } = await sb.from('custom_blocks')
+        .update({ days: next }).eq('id', blockId).eq('user_id', currentUser.id);
+      if (error) {
+        block.days = prev;
+        btn.classList.toggle('on', prev.includes(dow));
+        setSaveStatus('error', error.message);
+      } else {
+        setSaveStatus('saved');
+        const viewDow = new Date(state.viewDate + 'T12:00:00').getDay();
+        if (prev.includes(viewDow) !== next.includes(viewDow)) { buildHoje(); renderHoje(); }
+      }
+    });
+  });
+
+  // Listeners — editar (abre modal existente)
+  container.querySelectorAll('.habit-edit-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const block = state.customBlocks.find(b => b.id === btn.dataset.edit);
+      if (block) openBlockModal(block);
+    });
+  });
+
+  // Listeners — remover
+  container.querySelectorAll('.habit-rem-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id    = btn.dataset.remove;
+      const block = state.customBlocks.find(b => b.id === id);
+      if (!confirm(`Remover "${block?.name || 'este hábito'}"?`)) return;
+      btn.disabled = true;
+      try {
+        await deleteCustomBlock(id);
+        renderHabitLibrary();
+        buildHoje(); renderHoje();
+      } catch { btn.disabled = false; alert('Erro ao remover.'); }
+    });
+  });
+
+  // Listeners — adicionar preset
+  container.querySelectorAll('.preset-chip').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const preset = PRESET_BLOCKS.find(p => p.key === btn.dataset.key);
+      if (!preset) return;
+      btn.disabled = true;
+      try {
+        await addPresetBlock(preset);
+        renderHabitLibrary();
+        buildHoje(); renderHoje();
+      } catch { btn.disabled = false; alert('Erro ao adicionar hábito.'); }
+    });
+  });
+
+  // Listener — criar personalizado
+  container.querySelector('#lib-add-custom')?.addEventListener('click', () => openBlockModal());
+}
+
+// ============================================
 // Navegar para data específica
 // ============================================
 
@@ -974,7 +1143,7 @@ function switchTab(name) {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   document.querySelectorAll('.tab-content').forEach(t => t.classList.toggle('active', t.id === 'tab-' + name));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
-  if (name === 'semana') { renderWeek(); renderCalendar(); }
+  if (name === 'semana') { renderWeek(); renderCalendar(); renderHabitLibrary(); }
   if (name === 'treino') renderTreino();
 }
 
@@ -1135,9 +1304,15 @@ function buildSemana() {
       <div class="goal-bar"><div class="goal-fill" id="goal-fill" style="width:0%"></div></div>
     </div>
 
-    <!-- Configurar blocos por dia -->
+    <!-- Hábitos personalizados + biblioteca -->
     <div class="card" style="margin-top:10px">
-      <div class="card-title">Configurar blocos por dia da semana</div>
+      <div class="card-title">Hábitos personalizados</div>
+      <div id="habit-library-wrap"></div>
+    </div>
+
+    <!-- Configurar blocos fixos por dia -->
+    <div class="card" style="margin-top:10px">
+      <div class="card-title">Blocos fixos por dia da semana</div>
       <div class="schedule-wrap">
         <table class="schedule-table" id="schedule-table">
           <thead>
@@ -1198,6 +1373,7 @@ async function init() {
   renderComida();
   renderTreino();
   renderSchedule();
+  renderHabitLibrary();
 
   sb.auth.onAuthStateChange(event => {
     if (event === 'SIGNED_OUT') window.location.href = '/login';
