@@ -506,6 +506,70 @@ async function saveWeight(kg) {
 }
 
 // ============================================
+// Sincronização Academia ↔ Exercícios
+// ============================================
+
+// Verifica se todos os exercícios do dia estão feitos e sincroniza o bloco Academia
+async function syncAcademiaFromExercises() {
+  const dow = new Date(state.viewDate + 'T12:00:00').getDay();
+  const wk  = WORKOUTS[dow];
+  if (!wk || wk.exercises.length === 0) return;
+
+  const allDone = wk.exercises.every((_, i) => !!state.exDone[i]);
+
+  if (allDone && !state.dailyDone['academia']) {
+    // Todos os exercícios feitos → marca Academia automaticamente
+    state.dailyDone['academia'] = true;
+    renderHoje();
+    try {
+      await upsertDaily('academia', true);
+      await addXp(10); // XP do bloco Academia
+    } catch {
+      state.dailyDone['academia'] = false;
+      renderHoje();
+    }
+  } else if (!allDone && state.dailyDone['academia']) {
+    // Algum exercício desmarcado → desmarca Academia
+    state.dailyDone['academia'] = false;
+    renderHoje();
+    try {
+      await upsertDaily('academia', false);
+    } catch {
+      state.dailyDone['academia'] = true;
+      renderHoje();
+    }
+  }
+}
+
+// Preenche ou limpa todos os exercícios do dia (chamado pelo bloco Academia)
+async function syncExercisesFromAcademia(done) {
+  const dow = new Date(state.viewDate + 'T12:00:00').getDay();
+  const wk  = WORKOUTS[dow];
+  if (!wk || wk.exercises.length === 0) return;
+
+  // Atualiza estado localmente
+  wk.exercises.forEach((_, i) => { state.exDone[i] = done; });
+  renderTreino();
+
+  // Salva todos de uma vez no Supabase
+  setSaveStatus('saving');
+  try {
+    const uid  = currentUser.id;
+    const rows = wk.exercises.map((_, i) => ({
+      user_id: uid, date: state.viewDate, exercise_index: i, done,
+    }));
+    const { error } = await sb.from('exercise_logs')
+      .upsert(rows, { onConflict: 'user_id,date,exercise_index' });
+    if (error) throw error;
+    setSaveStatus('saved');
+  } catch (e) {
+    wk.exercises.forEach((_, i) => { state.exDone[i] = !done; });
+    renderTreino();
+    setSaveStatus('error', e.message);
+  }
+}
+
+// ============================================
 // Handlers
 // ============================================
 
@@ -516,10 +580,13 @@ async function toggleBlock(blockId, customXp = null) {
   try {
     await upsertDaily(blockId, newVal);
     if (newVal) {
-      // XP: bloco estático tem valor fixo; bloco customizado usa customXp
       const staticBlk = BLOCKS.find(b => b.id === blockId);
       const xpAmount  = staticBlk ? staticBlk.xp : (customXp ?? 5);
       await addXp(xpAmount);
+    }
+    // Se é o bloco Academia → sincroniza exercícios
+    if (blockId === 'academia') {
+      await syncExercisesFromAcademia(newVal);
     }
   } catch {
     state.dailyDone[blockId] = !newVal;
@@ -547,6 +614,8 @@ async function toggleExercise(idx) {
   try {
     await upsertExercise(idx, newVal);
     if (newVal) await addXp(2);
+    // Verifica se todos os exercícios foram concluídos → sincroniza Academia
+    await syncAcademiaFromExercises();
   } catch {
     state.exDone[idx] = !newVal;
     renderTreino();
