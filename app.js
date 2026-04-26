@@ -169,9 +169,8 @@ function setSaveStatus(status, detail = '') {
     el.textContent = '✓ salvo';
     saveTimer = setTimeout(() => { el.textContent = ''; el.className = 'save-status'; }, 2000);
   } else {
-    // Mostra o erro real para diagnóstico
-    el.textContent = '⚠ ' + (detail || 'erro ao salvar');
-    console.error('[SAVE ERROR]', detail);
+    el.textContent = '⚠ erro ao salvar';
+    if (detail) console.error('[SAVE ERROR]', detail);
   }
 }
 
@@ -850,15 +849,6 @@ async function init() {
   });
 
   document.getElementById('btn-logout').addEventListener('click', logout);
-
-  // Teste de conectividade — loga qualquer problema de acesso ao banco
-  const { error: pingError } = await sb.from('user_xp').select('user_id').limit(1);
-  if (pingError) {
-    console.error('[SUPABASE PING ERROR]', pingError);
-    setSaveStatus('error', 'Sem acesso ao banco: ' + (pingError.message || pingError.code));
-  } else {
-    console.log('[SUPABASE] Conectado com sucesso. User:', currentUser.id);
-  }
 
   await loadAll();
 
