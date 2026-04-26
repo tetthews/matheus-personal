@@ -141,15 +141,35 @@ const LEVELS = [
 
 const state = {
   today: getTodayStr(),
-  dailyDone: {},   // block_id → bool
-  mealDone: {},    // meal_id → bool
-  exDone: {},      // exercise_index → bool
-  waterCups: 0,    // 0-10
+  dailyDone: {},
+  mealDone: {},
+  exDone: {},
+  waterCups: 0,
   totalXp: 0,
   weightHistory: [],
-  weekData: {},    // date_str → { score, total }
+  weekData: {},
   tab: 'hoje',
 };
+
+// ============================================
+// Indicador de salvamento
+// ============================================
+
+let saveTimer = null;
+
+function setSaveStatus(status) {
+  // status: 'saving' | 'saved' | 'error'
+  const el = document.getElementById('save-status');
+  if (!el) return;
+  clearTimeout(saveTimer);
+  el.className = 'save-status ' + status;
+  el.textContent = status === 'saving' ? '⏳ salvando...'
+                 : status === 'saved'  ? '✓ salvo'
+                 : '⚠ erro ao salvar';
+  if (status === 'saved') {
+    saveTimer = setTimeout(() => { el.textContent = ''; el.className = 'save-status'; }, 2000);
+  }
+}
 
 // ============================================
 // Utilitários de data
@@ -215,30 +235,39 @@ function showXpToast(xp) {
 // ============================================
 
 async function loadAll() {
-  const uid = currentUser.id;
+  const uid   = currentUser.id;
   const today = state.today;
 
   const [daily, meals, ex, xpRow, weights] = await Promise.all([
-    sb.from('daily_logs').select('block_id,done').eq('user_id', uid).eq('date', today),
+    sb.from('daily_logs').select('block_id,done,value').eq('user_id', uid).eq('date', today),
     sb.from('meal_logs').select('meal_id,done').eq('user_id', uid).eq('date', today),
     sb.from('exercise_logs').select('exercise_index,done').eq('user_id', uid).eq('date', today),
     sb.from('user_xp').select('total_xp').eq('user_id', uid).maybeSingle(),
     sb.from('weight_logs').select('date,weight').eq('user_id', uid).order('date', { ascending: false }).limit(7),
   ]);
 
+  // Blocos do dia
   state.dailyDone = {};
-  (daily.data || []).forEach(r => { state.dailyDone[r.block_id] = r.done; });
+  (daily.data || []).forEach(r => {
+    state.dailyDone[r.block_id] = r.done;
+    // Carrega copos de água do Supabase (campo value da linha 'agua')
+    if (r.block_id === 'agua') {
+      state.waterCups = r.value || 0;
+    }
+  });
 
+  // Refeições
   state.mealDone = {};
   (meals.data || []).forEach(r => { state.mealDone[r.meal_id] = r.done; });
 
+  // Exercícios
   state.exDone = {};
   (ex.data || []).forEach(r => { state.exDone[r.exercise_index] = r.done; });
 
-  state.waterCups = state.dailyDone['agua'] ? 10 : (loadLocalCups() || 0);
-
+  // XP
   state.totalXp = xpRow.data?.total_xp || 0;
 
+  // Histórico de peso
   state.weightHistory = (weights.data || []).map(r => ({
     date: r.date,
     weight: parseFloat(r.weight),
@@ -248,13 +277,12 @@ async function loadAll() {
 }
 
 async function loadWeekData() {
-  const uid = currentUser.id;
+  const uid   = currentUser.id;
   const dates = Array.from({ length: 7 }, (_, i) => getDateStr(6 - i));
 
-  const [daily, meals, ex] = await Promise.all([
+  const [daily, meals] = await Promise.all([
     sb.from('daily_logs').select('date,block_id,done').eq('user_id', uid).in('date', dates),
     sb.from('meal_logs').select('date,meal_id,done').eq('user_id', uid).in('date', dates),
-    sb.from('exercise_logs').select('date,exercise_index,done').eq('user_id', uid).in('date', dates),
   ]);
 
   state.weekData = {};
@@ -269,67 +297,66 @@ async function loadWeekData() {
 }
 
 // ============================================
-// Supabase — Escrita
+// Supabase — Escrita com feedback visual
 // ============================================
 
-async function upsertDaily(blockId, done) {
-  const uid = currentUser.id;
-  await sb.from('daily_logs').upsert(
-    { user_id: uid, date: state.today, block_id: blockId, done },
-    { onConflict: 'user_id,date,block_id' }
-  );
+async function upsertDaily(blockId, done, value = null) {
+  const uid     = currentUser.id;
+  const payload = { user_id: uid, date: state.today, block_id: blockId, done };
+  if (value !== null) payload.value = value;
+
+  setSaveStatus('saving');
+  const { error } = await sb.from('daily_logs').upsert(payload, { onConflict: 'user_id,date,block_id' });
+  if (error) { setSaveStatus('error'); throw error; }
+  setSaveStatus('saved');
 }
 
 async function upsertMeal(mealId, done) {
   const uid = currentUser.id;
-  await sb.from('meal_logs').upsert(
+  setSaveStatus('saving');
+  const { error } = await sb.from('meal_logs').upsert(
     { user_id: uid, date: state.today, meal_id: mealId, done },
     { onConflict: 'user_id,date,meal_id' }
   );
+  if (error) { setSaveStatus('error'); throw error; }
+  setSaveStatus('saved');
 }
 
 async function upsertExercise(idx, done) {
   const uid = currentUser.id;
-  await sb.from('exercise_logs').upsert(
+  setSaveStatus('saving');
+  const { error } = await sb.from('exercise_logs').upsert(
     { user_id: uid, date: state.today, exercise_index: idx, done },
     { onConflict: 'user_id,date,exercise_index' }
   );
+  if (error) { setSaveStatus('error'); throw error; }
+  setSaveStatus('saved');
 }
 
 async function addXp(amount) {
   const uid = currentUser.id;
   state.totalXp += amount;
-  await sb.from('user_xp').upsert(
+  const { error } = await sb.from('user_xp').upsert(
     { user_id: uid, total_xp: state.totalXp, updated_at: new Date().toISOString() },
     { onConflict: 'user_id' }
   );
-  updateXpUI();
-  showXpToast(amount);
+  if (!error) {
+    updateXpUI();
+    showXpToast(amount);
+  }
 }
 
 async function saveWeight(kg) {
   const uid = currentUser.id;
-  await sb.from('weight_logs').insert(
+  setSaveStatus('saving');
+  const { error } = await sb.from('weight_logs').insert(
     { user_id: uid, date: state.today, weight: kg }
   );
+  if (error) { setSaveStatus('error'); throw error; }
+  setSaveStatus('saved');
   state.weightHistory.unshift({ date: state.today, weight: kg });
   if (state.weightHistory.length > 7) state.weightHistory.pop();
   renderWeek();
-}
-
-// ============================================
-// LocalStorage fallback
-// ============================================
-
-function loadLocalCups() {
-  try {
-    const d = localStorage.getItem('waterCups_' + state.today);
-    return d ? parseInt(d) : 0;
-  } catch { return 0; }
-}
-
-function saveLocalCups(n) {
-  try { localStorage.setItem('waterCups_' + state.today, n); } catch {}
 }
 
 // ============================================
@@ -339,19 +366,15 @@ function saveLocalCups(n) {
 function renderHoje() {
   const c = document.getElementById('tab-hoje');
 
-  // stats
   const mealsDone = Object.values(state.mealDone).filter(Boolean).length;
   c.querySelector('#stat-meals').textContent = `${mealsDone}/5`;
   c.querySelector('#stat-water').textContent = `${(state.waterCups * 0.25).toFixed(2)}L`;
 
-  // blocos
   BLOCKS.forEach(b => {
     const el = c.querySelector(`[data-block="${b.id}"]`);
-    if (!el) return;
-    el.classList.toggle('done', !!state.dailyDone[b.id]);
+    if (el) el.classList.toggle('done', !!state.dailyDone[b.id]);
   });
 
-  // copos
   const cups = c.querySelectorAll('.water-cup');
   cups.forEach((cup, i) => {
     cup.classList.toggle('filled', i < state.waterCups);
@@ -379,9 +402,9 @@ function renderComida() {
 
 function setMacroBars(c, p, carb, f, kcal) {
   const pct = (v, g) => Math.min(100, Math.round((v / g) * 100));
-  c.querySelector('#bar-prot').style.width  = pct(p, MACRO_GOALS.p)    + '%';
-  c.querySelector('#bar-carb').style.width  = pct(carb, MACRO_GOALS.c) + '%';
-  c.querySelector('#bar-fat').style.width   = pct(f, MACRO_GOALS.f)    + '%';
+  c.querySelector('#bar-prot').style.width  = pct(p, MACRO_GOALS.p)       + '%';
+  c.querySelector('#bar-carb').style.width  = pct(carb, MACRO_GOALS.c)    + '%';
+  c.querySelector('#bar-fat').style.width   = pct(f, MACRO_GOALS.f)       + '%';
   c.querySelector('#bar-kcal').style.width  = pct(kcal, MACRO_GOALS.kcal) + '%';
   c.querySelector('#val-prot').textContent  = `${p}/${MACRO_GOALS.p}g`;
   c.querySelector('#val-carb').textContent  = `${carb}/${MACRO_GOALS.c}g`;
@@ -447,22 +470,22 @@ function renderWeek() {
   // streak
   let streak = 0;
   for (let i = 0; i < 30; i++) {
-    const d = getDateStr(i);
+    const d  = getDateStr(i);
     const wd = state.weekData[d];
     if (wd && wd.score >= 7) streak++;
     else if (i > 0) break;
   }
-  c.querySelector('#streak-num').textContent   = streak;
+  c.querySelector('#streak-num').textContent = streak;
 
   // week grid
-  const grid = c.querySelector('#week-grid');
-  grid.innerHTML = '';
+  const grid     = c.querySelector('#week-grid');
   const dayNames = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+  grid.innerHTML  = '';
   for (let i = 6; i >= 0; i--) {
-    const ds  = getDateStr(i);
-    const wd  = state.weekData[ds];
-    const dt  = new Date(ds + 'T00:00:00');
-    const dn  = dayNames[dt.getDay()];
+    const ds    = getDateStr(i);
+    const wd    = state.weekData[ds];
+    const dt    = new Date(ds + 'T00:00:00');
+    const dn    = dayNames[dt.getDay()];
     const isToday = ds === state.today;
 
     let cls = '';
@@ -505,7 +528,7 @@ function renderWeek() {
   if (lastW != null) {
     const range = goalStart - goalEnd;
     const prog  = Math.max(0, Math.min(100, ((goalStart - lastW) / range) * 100));
-    c.querySelector('#goal-fill').style.width  = prog + '%';
+    c.querySelector('#goal-fill').style.width    = prog + '%';
     c.querySelector('#goal-current').textContent = `${lastW} kg`;
   }
 }
@@ -516,60 +539,82 @@ function renderWeek() {
 
 async function toggleBlock(blockId) {
   const newVal = !state.dailyDone[blockId];
+
+  // Optimista
   state.dailyDone[blockId] = newVal;
   renderHoje();
 
-  upsertDaily(blockId, newVal).catch(() => {
+  try {
+    await upsertDaily(blockId, newVal);
+    if (newVal) {
+      const blk = BLOCKS.find(b => b.id === blockId);
+      if (blk) await addXp(blk.xp);
+    }
+  } catch {
+    // Reverte em caso de erro
     state.dailyDone[blockId] = !newVal;
     renderHoje();
-  });
-
-  if (newVal) {
-    const blk = BLOCKS.find(b => b.id === blockId);
-    if (blk) await addXp(blk.xp);
   }
 }
 
 async function toggleMeal(mealId) {
   const newVal = !state.mealDone[mealId];
+
   state.mealDone[mealId] = newVal;
   renderComida();
   renderHoje();
 
-  upsertMeal(mealId, newVal).catch(() => {
+  try {
+    await upsertMeal(mealId, newVal);
+    if (newVal) await addXp(3);
+  } catch {
     state.mealDone[mealId] = !newVal;
     renderComida();
     renderHoje();
-  });
-
-  if (newVal) await addXp(3);
+  }
 }
 
 async function toggleExercise(idx) {
   const newVal = !state.exDone[idx];
+
   state.exDone[idx] = newVal;
   renderTreino();
 
-  upsertExercise(idx, newVal).catch(() => {
+  try {
+    await upsertExercise(idx, newVal);
+    if (newVal) await addXp(2);
+  } catch {
     state.exDone[idx] = !newVal;
     renderTreino();
-  });
-
-  if (newVal) await addXp(2);
+  }
 }
 
 // ============================================
-// Água
+// Água — salva no Supabase via campo value
 // ============================================
 
 async function toggleCup(cupIdx) {
+  // Clica num copo já cheio → esvazia a partir dele; clica num vazio → preenche até ele
   const newCups = cupIdx < state.waterCups ? cupIdx : cupIdx + 1;
+
+  // Optimista
   state.waterCups = newCups;
-  saveLocalCups(newCups);
   renderHoje();
 
-  if (newCups >= 10 && !state.dailyDone['agua']) {
-    await toggleBlock('agua');
+  const aguaDone = newCups >= 10;
+
+  try {
+    // Salva quantidade de copos no campo value + done se completou a meta
+    await upsertDaily('agua', aguaDone, newCups);
+    state.dailyDone['agua'] = aguaDone;
+    renderHoje();
+
+    // XP só na primeira vez que completa os 10 copos
+    if (aguaDone && !state.dailyDone['agua']) await addXp(5);
+  } catch {
+    // Reverte
+    state.waterCups = cupIdx < state.waterCups ? cupIdx + 1 : cupIdx;
+    renderHoje();
   }
 }
 
@@ -584,8 +629,19 @@ async function handleSaveWeight() {
     alert('Informe um peso válido (ex: 89.5)');
     return;
   }
-  inp.value = '';
-  await saveWeight(val);
+  const btn = document.getElementById('btn-save-weight');
+  btn.disabled = true;
+  btn.textContent = 'Salvando...';
+
+  try {
+    await saveWeight(val);
+    inp.value = '';
+  } catch {
+    alert('Erro ao salvar peso. Tente novamente.');
+  } finally {
+    btn.disabled    = false;
+    btn.textContent = 'Salvar';
+  }
 }
 
 // ============================================
@@ -614,6 +670,7 @@ function switchTab(name) {
   });
 
   if (name === 'semana') renderWeek();
+  if (name === 'treino') renderTreino();
 }
 
 // ============================================
@@ -756,7 +813,6 @@ function buildSemana() {
 // ============================================
 
 async function init() {
-  // Proteção de rota
   const { data: { session } } = await sb.auth.getSession();
   if (!session) {
     window.location.href = '/login';
@@ -764,15 +820,12 @@ async function init() {
   }
   currentUser = session.user;
 
-  // Data no header
   document.getElementById('header-date').textContent = formatDatePT(state.today);
 
-  // Build estático das abas
   buildHoje();
   buildComida();
   buildSemana();
 
-  // Tabs
   document.querySelectorAll('.tab-btn').forEach(b => {
     b.addEventListener('click', () => switchTab(b.dataset.tab));
   });
@@ -780,19 +833,15 @@ async function init() {
     b.addEventListener('click', () => switchTab(b.dataset.tab));
   });
 
-  // Logout
   document.getElementById('btn-logout').addEventListener('click', logout);
 
-  // Carrega dados
   await loadAll();
 
-  // Render inicial
   updateXpUI();
   renderHoje();
   renderComida();
   renderTreino();
 
-  // Listener de mudança de sessão
   sb.auth.onAuthStateChange((event) => {
     if (event === 'SIGNED_OUT') window.location.href = '/login';
   });
