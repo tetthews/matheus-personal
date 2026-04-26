@@ -157,17 +157,21 @@ const state = {
 
 let saveTimer = null;
 
-function setSaveStatus(status) {
+function setSaveStatus(status, detail = '') {
   // status: 'saving' | 'saved' | 'error'
   const el = document.getElementById('save-status');
   if (!el) return;
   clearTimeout(saveTimer);
   el.className = 'save-status ' + status;
-  el.textContent = status === 'saving' ? '⏳ salvando...'
-                 : status === 'saved'  ? '✓ salvo'
-                 : '⚠ erro ao salvar';
-  if (status === 'saved') {
+  if (status === 'saving') {
+    el.textContent = '⏳ salvando...';
+  } else if (status === 'saved') {
+    el.textContent = '✓ salvo';
     saveTimer = setTimeout(() => { el.textContent = ''; el.className = 'save-status'; }, 2000);
+  } else {
+    // Mostra o erro real para diagnóstico
+    el.textContent = '⚠ ' + (detail || 'erro ao salvar');
+    console.error('[SAVE ERROR]', detail);
   }
 }
 
@@ -307,7 +311,11 @@ async function upsertDaily(blockId, done, value = null) {
 
   setSaveStatus('saving');
   const { error } = await sb.from('daily_logs').upsert(payload, { onConflict: 'user_id,date,block_id' });
-  if (error) { setSaveStatus('error'); throw error; }
+  if (error) {
+    const msg = error.message || error.details || JSON.stringify(error);
+    setSaveStatus('error', msg);
+    throw new Error(msg);
+  }
   setSaveStatus('saved');
 }
 
@@ -318,7 +326,11 @@ async function upsertMeal(mealId, done) {
     { user_id: uid, date: state.today, meal_id: mealId, done },
     { onConflict: 'user_id,date,meal_id' }
   );
-  if (error) { setSaveStatus('error'); throw error; }
+  if (error) {
+    const msg = error.message || error.details || JSON.stringify(error);
+    setSaveStatus('error', msg);
+    throw new Error(msg);
+  }
   setSaveStatus('saved');
 }
 
@@ -329,7 +341,11 @@ async function upsertExercise(idx, done) {
     { user_id: uid, date: state.today, exercise_index: idx, done },
     { onConflict: 'user_id,date,exercise_index' }
   );
-  if (error) { setSaveStatus('error'); throw error; }
+  if (error) {
+    const msg = error.message || error.details || JSON.stringify(error);
+    setSaveStatus('error', msg);
+    throw new Error(msg);
+  }
   setSaveStatus('saved');
 }
 
@@ -834,6 +850,15 @@ async function init() {
   });
 
   document.getElementById('btn-logout').addEventListener('click', logout);
+
+  // Teste de conectividade — loga qualquer problema de acesso ao banco
+  const { error: pingError } = await sb.from('user_xp').select('user_id').limit(1);
+  if (pingError) {
+    console.error('[SUPABASE PING ERROR]', pingError);
+    setSaveStatus('error', 'Sem acesso ao banco: ' + (pingError.message || pingError.code));
+  } else {
+    console.log('[SUPABASE] Conectado com sucesso. User:', currentUser.id);
+  }
 
   await loadAll();
 
