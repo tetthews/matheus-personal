@@ -89,6 +89,40 @@
   <!-- XP Toast -->
   <div class="xp-toast" id="xp-toast"></div>
 
+  <!-- Modal: Adicionar/Editar bloco customizado -->
+  <div class="modal-overlay" id="block-modal">
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <div class="modal-header">
+        <h3 class="modal-title" id="modal-title">Novo item</h3>
+        <button class="modal-close" id="modal-close">✕</button>
+      </div>
+
+      <div class="field">
+        <label>Emoji</label>
+        <input type="text" id="block-emoji" placeholder="⭐" maxlength="4" class="emoji-input">
+      </div>
+
+      <div class="field">
+        <label>Título</label>
+        <input type="text" id="block-name" placeholder="Ex: Alongamento">
+      </div>
+
+      <div class="field">
+        <label>XP ao completar</label>
+        <input type="number" id="block-xp" value="5" min="1" max="99" class="xp-input">
+      </div>
+
+      <div class="field">
+        <label>Dias da semana</label>
+        <div class="day-picker" id="day-picker"></div>
+      </div>
+
+      <button class="btn-primary" id="modal-save">Salvar item</button>
+      <button class="btn-delete" id="modal-delete">Excluir item</button>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="config.js"></script>
   <script src="app.js"></script>

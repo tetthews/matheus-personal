@@ -65,6 +65,7 @@ const state = {
   calYear:       new Date().getFullYear(),
   calMonth:      new Date().getMonth(),
   blockSchedule: loadSchedule(),
+  customBlocks:  [],
   tab:           'hoje',
 };
 
@@ -226,6 +227,143 @@ function updateHeaderDate() {
 }
 
 // ============================================
+// Blocos Customizados — CRUD
+// ============================================
+
+async function loadCustomBlocks() {
+  const { data } = await sb.from('custom_blocks')
+    .select('*')
+    .eq('user_id', currentUser.id)
+    .order('position', { ascending: true });
+  state.customBlocks = data || [];
+}
+
+function getActiveCustomBlocks(dateStr) {
+  const dow = new Date(dateStr + 'T12:00:00').getDay();
+  return state.customBlocks.filter(b => Array.isArray(b.days) && b.days.includes(dow));
+}
+
+async function saveCustomBlock({ id, emoji, name, xp, days }) {
+  const uid = currentUser.id;
+  setSaveStatus('saving');
+  if (id) {
+    const { error } = await sb.from('custom_blocks')
+      .update({ emoji, name, xp, days })
+      .eq('id', id).eq('user_id', uid);
+    if (error) { setSaveStatus('error', error.message); throw error; }
+    const idx = state.customBlocks.findIndex(b => b.id === id);
+    if (idx > -1) Object.assign(state.customBlocks[idx], { emoji, name, xp, days });
+  } else {
+    const position = state.customBlocks.length;
+    const { data, error } = await sb.from('custom_blocks')
+      .insert({ user_id: uid, emoji, name, xp, days, position })
+      .select().single();
+    if (error) { setSaveStatus('error', error.message); throw error; }
+    state.customBlocks.push(data);
+  }
+  setSaveStatus('saved');
+}
+
+async function deleteCustomBlock(id) {
+  const uid = currentUser.id;
+  setSaveStatus('saving');
+  const { error } = await sb.from('custom_blocks').delete().eq('id', id).eq('user_id', uid);
+  if (error) { setSaveStatus('error', error.message); throw error; }
+  state.customBlocks = state.customBlocks.filter(b => b.id !== id);
+  // Remove entradas de daily_logs orphaned
+  await sb.from('daily_logs').delete().eq('user_id', uid).eq('block_id', id);
+  setSaveStatus('saved');
+}
+
+// ============================================
+// Modal de bloco customizado
+// ============================================
+
+let modalEditId = null;
+let modalDays   = [0, 1, 2, 3, 4, 5, 6];
+
+function openBlockModal(block = null) {
+  modalEditId = block?.id || null;
+  modalDays   = block?.days ? [...block.days] : [0, 1, 2, 3, 4, 5, 6];
+
+  document.getElementById('modal-title').textContent  = block ? 'Editar item' : 'Novo item';
+  document.getElementById('block-emoji').value        = block?.emoji || '';
+  document.getElementById('block-name').value         = block?.name  || '';
+  document.getElementById('block-xp').value           = block?.xp    || 5;
+  document.getElementById('modal-delete').style.display = block ? 'block' : 'none';
+
+  renderDayPicker();
+  document.getElementById('block-modal').classList.add('open');
+  document.getElementById('block-emoji').focus();
+}
+
+function closeBlockModal() {
+  document.getElementById('block-modal').classList.remove('open');
+  modalEditId = null;
+}
+
+function renderDayPicker() {
+  const picker = document.getElementById('day-picker');
+  picker.innerHTML = DAY_SHORT.map((d, i) => `
+    <button type="button" class="day-pick-btn${modalDays.includes(i) ? ' active' : ''}" data-dow="${i}">
+      ${d}
+    </button>`).join('');
+
+  picker.querySelectorAll('.day-pick-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const dow = parseInt(btn.dataset.dow);
+      const idx = modalDays.indexOf(dow);
+      if (idx > -1) modalDays.splice(idx, 1);
+      else modalDays.push(dow);
+      btn.classList.toggle('active', modalDays.includes(dow));
+    });
+  });
+}
+
+function initModal() {
+  document.getElementById('modal-close').addEventListener('click', closeBlockModal);
+  document.getElementById('block-modal').addEventListener('click', e => {
+    if (e.target === document.getElementById('block-modal')) closeBlockModal();
+  });
+
+  document.getElementById('modal-save').addEventListener('click', async () => {
+    const emoji = document.getElementById('block-emoji').value.trim() || '⭐';
+    const name  = document.getElementById('block-name').value.trim();
+    const xp    = parseInt(document.getElementById('block-xp').value) || 5;
+
+    if (!name) { document.getElementById('block-name').focus(); return; }
+    if (modalDays.length === 0) { alert('Selecione pelo menos um dia.'); return; }
+
+    const btn = document.getElementById('modal-save');
+    btn.disabled = true; btn.textContent = 'Salvando...';
+
+    try {
+      await saveCustomBlock({ id: modalEditId, emoji, name, xp, days: [...modalDays].sort() });
+      closeBlockModal();
+      buildHoje();
+      renderHoje();
+    } catch { alert('Erro ao salvar. Tente novamente.'); }
+    finally { btn.disabled = false; btn.textContent = 'Salvar item'; }
+  });
+
+  document.getElementById('modal-delete').addEventListener('click', async () => {
+    if (!modalEditId) return;
+    if (!confirm('Excluir este item? O histórico do dia atual será mantido.')) return;
+
+    const btn = document.getElementById('modal-delete');
+    btn.disabled = true; btn.textContent = 'Excluindo...';
+
+    try {
+      await deleteCustomBlock(modalEditId);
+      closeBlockModal();
+      buildHoje();
+      renderHoje();
+    } catch { alert('Erro ao excluir. Tente novamente.'); }
+    finally { btn.disabled = false; btn.textContent = 'Excluir item'; }
+  });
+}
+
+// ============================================
 // Supabase — Leitura
 // ============================================
 
@@ -371,13 +509,18 @@ async function saveWeight(kg) {
 // Handlers
 // ============================================
 
-async function toggleBlock(blockId) {
+async function toggleBlock(blockId, customXp = null) {
   const newVal = !state.dailyDone[blockId];
   state.dailyDone[blockId] = newVal;
   renderHoje();
   try {
     await upsertDaily(blockId, newVal);
-    if (newVal) { const blk = BLOCKS.find(b => b.id === blockId); if (blk) await addXp(blk.xp); }
+    if (newVal) {
+      // XP: bloco estático tem valor fixo; bloco customizado usa customXp
+      const staticBlk = BLOCKS.find(b => b.id === blockId);
+      const xpAmount  = staticBlk ? staticBlk.xp : (customXp ?? 5);
+      await addXp(xpAmount);
+    }
   } catch {
     state.dailyDone[blockId] = !newVal;
     renderHoje();
@@ -465,11 +608,19 @@ function renderHoje() {
   const c            = document.getElementById('tab-hoje');
   const mealsDone    = Object.values(state.mealDone).filter(Boolean).length;
   const activeBlocks = getActiveBlocks(state.viewDate);
+  const activeCustom = getActiveCustomBlocks(state.viewDate);
 
   c.querySelector('#stat-meals').textContent = `${mealsDone}/5`;
   c.querySelector('#stat-water').textContent = `${(state.waterCups * 0.25).toFixed(2)}L`;
 
+  // Blocos estáticos
   activeBlocks.forEach(b => {
+    const el = c.querySelector(`[data-block="${b.id}"]`);
+    if (el) el.classList.toggle('done', !!state.dailyDone[b.id]);
+  });
+
+  // Blocos customizados
+  activeCustom.forEach(b => {
     const el = c.querySelector(`[data-block="${b.id}"]`);
     if (el) el.classList.toggle('done', !!state.dailyDone[b.id]);
   });
@@ -764,21 +915,38 @@ function switchTab(name) {
 
 function buildHoje() {
   const activeBlocks = getActiveBlocks(state.viewDate);
+  const activeCustom = getActiveCustomBlocks(state.viewDate);
   const el = document.getElementById('tab-hoje');
+
+  const staticHTML = activeBlocks.map(b => `
+    <div class="block-item" data-block="${b.id}">
+      <span class="block-icon">${b.icon}</span>
+      <div class="block-info">
+        <div class="block-name">${b.name}</div>
+        <div class="block-xp">+${b.xp} XP</div>
+      </div>
+      <div class="block-check"></div>
+    </div>`).join('');
+
+  const customHTML = activeCustom.map(b => `
+    <div class="block-item custom-block" data-block="${b.id}">
+      <span class="block-icon">${b.emoji}</span>
+      <div class="block-info">
+        <div class="block-name">${b.name}</div>
+        <div class="block-xp">+${b.xp} XP</div>
+      </div>
+      <button class="block-edit-btn" data-edit="${b.id}" title="Editar">✏️</button>
+      <div class="block-check"></div>
+    </div>`).join('');
+
   el.innerHTML = `
     <div class="stats-row">
       <div class="stat-pill"><div class="val" id="stat-meals">0/5</div><div class="lbl">Refeições</div></div>
       <div class="stat-pill"><div class="val" id="stat-water">0.00L</div><div class="lbl">Água</div></div>
     </div>
-    ${activeBlocks.map(b => `
-      <div class="block-item" data-block="${b.id}">
-        <span class="block-icon">${b.icon}</span>
-        <div class="block-info">
-          <div class="block-name">${b.name}</div>
-          <div class="block-xp">+${b.xp} XP</div>
-        </div>
-        <div class="block-check"></div>
-      </div>`).join('')}
+    ${staticHTML}
+    ${customHTML}
+    <button class="add-block-btn" id="add-block-btn">＋ Adicionar item</button>
     <div class="card" style="margin-top:12px">
       <div class="card-title">Copos de água (250ml cada)</div>
       <div class="water-grid">
@@ -786,9 +954,31 @@ function buildHoje() {
       </div>
     </div>`;
 
-  el.querySelectorAll('.block-item').forEach(el => {
-    el.addEventListener('click', () => toggleBlock(el.dataset.block));
+  // Blocos estáticos
+  activeBlocks.forEach(b => {
+    const item = el.querySelector(`[data-block="${b.id}"]`);
+    item?.addEventListener('click', () => toggleBlock(b.id));
   });
+
+  // Blocos customizados — clique no card togla, clique no lápis abre modal
+  activeCustom.forEach(b => {
+    const item = el.querySelector(`.custom-block[data-block="${b.id}"]`);
+    if (!item) return;
+
+    const editBtn = item.querySelector('.block-edit-btn');
+    editBtn?.addEventListener('click', e => {
+      e.stopPropagation();
+      openBlockModal(b);
+    });
+
+    item.addEventListener('click', e => {
+      if (e.target.closest('.block-edit-btn')) return;
+      toggleBlock(b.id, b.xp);
+    });
+  });
+
+  el.querySelector('#add-block-btn')?.addEventListener('click', () => openBlockModal());
+
   el.querySelectorAll('.water-cup').forEach(cup => {
     cup.addEventListener('click', () => toggleCup(parseInt(cup.dataset.cup)));
   });
@@ -924,11 +1114,16 @@ async function init() {
   document.getElementById('btn-goto-today').addEventListener('click', goToToday);
   document.getElementById('btn-logout').addEventListener('click', logout);
 
+  // Inicializa modal de blocos customizados
+  initModal();
+
   // Carrega dados
+  await loadCustomBlocks();
   await loadAllForDate(state.viewDate);
   await loadMonthData(state.calYear, state.calMonth);
 
   // Render inicial
+  buildHoje(); // rebuild com custom blocks carregados
   updateXpUI();
   renderHoje();
   renderComida();
