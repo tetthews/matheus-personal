@@ -1,2 +1,2 @@
-const SUPABASE_URL = 'COLOQUE_SUA_URL_AQUI';
-const SUPABASE_ANON_KEY = 'COLOQUE_SUA_ANON_KEY_AQUI';
+const SUPABASE_URL = 'https://naayognhuhlbzvfnsjsq.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5hYXlvZ25odWhsYnp2Zm5zanNxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxNDUxODIsImV4cCI6MjA5MjcyMTE4Mn0.rqX_t5hekk2V5q3RrCndsg91Lpxu1qKmSO5XgCPkzdU';
