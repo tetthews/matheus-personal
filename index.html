@@ -13,11 +13,16 @@
     <!-- Header -->
     <header class="app-header">
       <div class="header-top">
-        <div>
-          <div class="header-name">Matheus</div>
-          <div class="header-date" id="header-date"></div>
+        <div class="date-nav">
+          <button class="nav-day-btn" id="prev-day">‹</button>
+          <div class="header-center">
+            <div class="header-name">Matheus</div>
+            <div class="header-date" id="header-date"></div>
+          </div>
+          <button class="nav-day-btn" id="next-day">›</button>
         </div>
         <div class="header-right">
+          <button class="btn-goto-today" id="btn-goto-today" style="display:none">Hoje</button>
           <span class="level-badge" id="level-badge">Iniciante</span>
           <button class="btn-logout" id="btn-logout">Sair</button>
         </div>
